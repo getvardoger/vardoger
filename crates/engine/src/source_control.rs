@@ -316,6 +316,16 @@ impl ChangeRequestResolver {
         &self,
         source: &CheckoutSourceContext,
     ) -> Result<Option<ChangeRequestSummary>, ChangeRequestError> {
+        // A GitLab remote (nested groups included, which the GitHub parse
+        // refuses) asks `glab` for the branch's merge request.
+        if let Some(project) = source.branch.remote_url.as_deref().and_then(gitlab::parse_remote)
+            && self.github.is_gitlab(&project).await
+        {
+            return self
+                .github
+                .find_gitlab_for_branch(&project, &source.branch.head_selectors)
+                .await;
+        }
         if source.branch.host.is_none()
             || source.branch.owner.is_none()
             || source.branch.repository.is_none()

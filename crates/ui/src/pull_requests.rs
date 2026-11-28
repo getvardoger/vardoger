@@ -488,6 +488,8 @@ pub struct PullRequestsPage {
     selected_url: Option<String>,
     sort_menu: popover::Popup<()>,
     filter_menu: popover::Popup<()>,
+    /// The filter pulled onto the bar whose dropdown is open.
+    quick_menu: popover::Popup<FilterKey>,
     /// The filter whose submenu shows beside the Filters card.
     opened: Option<FilterKey>,
     /// The Author and Labels submenus' search.
@@ -556,6 +558,7 @@ impl PullRequestsPage {
             selected_url: None,
             sort_menu: popover::Popup::default(),
             filter_menu: popover::Popup::default(),
+            quick_menu: popover::Popup::default(),
             opened: None,
             sub_search,
             sub_query: String::new(),
@@ -1129,6 +1132,9 @@ impl PullRequestsPage {
         if self.filter_menu.begin_close() {
             popover::reap_popup(cx, |page: &mut Self| &mut page.filter_menu);
         }
+        if self.quick_menu.begin_close() {
+            popover::reap_popup(cx, |page: &mut Self| &mut page.quick_menu);
+        }
         self.opened = None;
         cx.notify();
     }
@@ -1181,6 +1187,72 @@ impl PullRequestsPage {
                 "pr-sort-menu",
                 menu.into_any_element(),
                 self.sort_menu.closing_since(),
+            ));
+        }
+        trigger.into_any_element()
+    }
+
+    /// A filter changed often enough to sit on the bar: its value, and the
+    /// Filters card's own submenu as a dropdown.
+    fn render_quick(&mut self, key: FilterKey, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let p = &self.picks;
+        let (value, glyph, set) = match key {
+            FilterKey::State => {
+                let (_, label, glyph) = choice(&STATES, p.state);
+                (label.to_owned(), glyph, p.state != ChangeRequestStateFilter::Open)
+            }
+            FilterKey::Project if p.project.is_empty() => ("All projects".to_owned(), icons::LUCIDE_FOLDER_GIT_2, false),
+            FilterKey::Project => (p.project.clone(), icons::LUCIDE_FOLDER_GIT_2, true),
+            FilterKey::Author if p.author.is_empty() => ("Anyone".to_owned(), icons::LUCIDE_USER_ROUND, false),
+            FilterKey::Author => (p.author.clone(), icons::LUCIDE_USER_ROUND, true),
+            _ => return div().into_any_element(),
+        };
+        let open = self.quick_menu.get() == Some(&key) && self.quick_menu.is_open();
+        let hover = theme.element_hover;
+        let mut trigger = div()
+            .id(SharedString::from(format!("pr-quick-{key:?}")))
+            .debug_selector(move || format!("pr-quick-{key:?}"))
+            .h(px(30.0))
+            .flex_none()
+            .px(px(10.0))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .rounded(px(8.0))
+            .border_1()
+            .border_color(if set { theme.accent.opacity(0.5) } else { theme.border })
+            .text_size(px(12.5))
+            .text_color(theme.text)
+            .cursor_pointer()
+            .when(open, |el| el.bg(hover))
+            .hover(move |s| s.bg(hover))
+            .child(icon(glyph).size(px(14.0)).text_color(theme.text_muted))
+            .child(div().max_w(px(160.0)).truncate().child(value))
+            .child(icon(icons::ALT_ARROW_DOWN).size(px(12.0)).text_color(theme.text_muted))
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(move |page, _, _, _| page.quick_menu.note_trigger_press_matching(|k| *k == key)),
+            )
+            .on_click(cx.listener(move |page, _, window, cx| {
+                cx.stop_propagation();
+                let was_open = page.quick_menu.take_press_was_open();
+                page.close_menus(cx);
+                if !was_open {
+                    page.quick_menu.open(key);
+                    page.open_sub(key, window, cx);
+                    // The Filters card's submenu stays shut.
+                    page.opened = None;
+                }
+                cx.notify();
+            }));
+        if self.quick_menu.get() == Some(&key) {
+            let sub = div()
+                .on_mouse_down_out(cx.listener(|page, _, _, cx| page.close_menus(cx)))
+                .child(self.render_sub(key, theme, cx));
+            trigger = trigger.child(popover::anchored_menu_below(
+                format!("pr-quick-menu-{key:?}"),
+                sub.into_any_element(),
+                self.quick_menu.closing_since(),
             ));
         }
         trigger.into_any_element()
@@ -1865,6 +1937,8 @@ impl Render for PullRequestsPage {
             });
         let search = crate::surface_chrome::input()
             .h(px(30.0))
+            // Narrower than this, the bar's chips wrap under it instead.
+            .min_w(px(220.0))
             .rounded(px(8.0))
             .px(px(10.0))
             .child(
@@ -1916,9 +1990,13 @@ impl Render for PullRequestsPage {
                 div()
                     .mt(px(14.0))
                     .flex()
+                    .flex_wrap()
                     .items_center()
                     .gap(px(8.0))
                     .child(search)
+                    .child(self.render_quick(FilterKey::State, &theme, cx))
+                    .child(self.render_quick(FilterKey::Project, &theme, cx))
+                    .child(self.render_quick(FilterKey::Author, &theme, cx))
                     .child(self.render_sort(&theme, cx))
                     .child(self.render_filters(&theme, cx))
                     .child(refresh),

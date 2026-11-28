@@ -36,11 +36,17 @@ pub(crate) struct ChangeRequestBadgeModel {
     pub state_label: &'static str,
     pub title: SharedString,
     pub tone: ChangeRequestBadgeTone,
+    /// "PR #" or GitLab's "MR !".
+    pub prefix: &'static str,
 }
 
 impl ChangeRequestBadgeModel {
     pub fn from_summary(summary: &ChangeRequestSummary) -> Self {
-        Self::from_fields(summary.number, &summary.title, summary.state)
+        let mut model = Self::from_fields(summary.number, &summary.title, summary.state);
+        if summary.provider == "gitlab" {
+            model.prefix = "MR !";
+        }
+        model
     }
 
     fn from_fields(number: u64, title: &str, state: ChangeRequestState) -> Self {
@@ -54,6 +60,7 @@ impl ChangeRequestBadgeModel {
             state_label,
             title: title.replace(['\r', '\n'], " ").into(),
             tone,
+            prefix: "PR #",
         }
     }
 }
@@ -84,8 +91,8 @@ impl Render for ChangeRequestTooltip {
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(self.model.tone.color(theme))
                     .child(SharedString::from(format!(
-                        "PR #{} · {}",
-                        self.model.number, self.model.state_label
+                        "{}{} · {}",
+                        self.model.prefix, self.model.number, self.model.state_label
                     ))),
             )
             .child(

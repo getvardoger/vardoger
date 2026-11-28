@@ -4,7 +4,7 @@
 use chrono::{DateTime, Utc};
 use commutator_proto::change_request_assessment::{ChangeRequestCi, CiState};
 use commutator_proto::{
-    ChangeRequestActor, ChangeRequestFilter, ChangeRequestListItem, ChangeRequestMergeability,
+    ChangeRequestActor, ChangeRequestSignals, ChangeRequestSummary, ChangeRequestFilter, ChangeRequestListItem, ChangeRequestMergeability,
     ChangeRequestLabel, ChangeRequestPage, ChangeRequestReviewDecision, ChangeRequestState,
     ChangeRequestStateFilter,
 };
@@ -79,6 +79,22 @@ const MERGE_REQUESTS: &str = "query($path: ID!, $state: MergeRequestState, $afte
   }
 }";
 
+/// A branch's merge requests, newest first: the checkout watch's question
+/// (`gh pr list --head`'s counterpart).
+const BRANCH_MERGE_REQUESTS: &str = "query($path: ID!, $branch: String!) {
+  currentUser { username }
+  project(fullPath: $path) {
+    mergeRequests(sourceBranches: [$branch], state: all, first: 5, sort: UPDATED_DESC) {
+      nodes {
+        iid title webUrl state draft createdAt updatedAt approved conflicts detailedMergeStatus diffHeadSha sourceBranch targetBranch
+        author { username name avatarUrl }
+        reviewers { nodes { username mergeRequestInteraction { reviewState } } }
+        headPipeline { status jobs { count } }
+      }
+    }
+  }
+}";
+
 #[derive(Deserialize)]
 struct Graphql<T> {
     data: Option<T>,
@@ -126,6 +142,8 @@ struct MergeRequest {
     state: String,
     #[serde(default)]
     source_branch: String,
+    #[serde(default)]
+    target_branch: String,
     #[serde(default)]
     labels: Option<Connection<Label>>,
     #[serde(default)]
@@ -320,6 +338,23 @@ impl GitHubCli {
         page(project, data)
     }
 
+    /// The merge request of a checkout's branch: the open one, else the
+    /// latest. Asked fresh each time; the checkout watch keeps its own TTL.
+    pub async fn find_gitlab_for_branch(
+        &self,
+        project: &GitLabProject,
+        branches: &[String],
+    ) -> Result<Option<ChangeRequestSummary>, ChangeRequestError> {
+        for branch in branches {
+            let vars = [("path", project.path.clone()), ("branch", branch.clone())];
+            let data: ListData = self.glab_graphql(project, BRANCH_MERGE_REQUESTS, &vars).await?;
+            if let Some(found) = branch_summary(project, data)? {
+                return Ok(Some(found));
+            }
+        }
+        Ok(None)
+    }
+
     async fn glab_graphql<T: serde::de::DeserializeOwned>(
         &self,
         project: &GitLabProject,
@@ -406,6 +441,40 @@ fn page(project: &GitLabProject, data: ListData) -> Result<ChangeRequestPage, Ch
         total_count: requests.count,
         fetched_at: Some(Utc::now()),
     })
+}
+
+/// The open merge request of a `BRANCH_MERGE_REQUESTS` answer, else its
+/// latest, as a checkout's summary.
+fn branch_summary(
+    project: &GitLabProject,
+    data: ListData,
+) -> Result<Option<ChangeRequestSummary>, ChangeRequestError> {
+    let mut nodes = data.project.ok_or(ChangeRequestError::UnsupportedRepository)?.merge_requests.nodes;
+    let me = data.current_user.map(|user| user.username);
+    let pick = nodes.iter().position(|mr| mr.state == "opened").unwrap_or(0);
+    if nodes.is_empty() {
+        return Ok(None);
+    }
+    let mr = nodes.swap_remove(pick);
+    let base_ref = mr.target_branch.clone();
+    let Some(item) = item(project, me.as_deref(), mr) else {
+        return Ok(None);
+    };
+    let open = item.state == ChangeRequestState::Open;
+    Ok(Some(ChangeRequestSummary {
+        provider: item.provider,
+        number: item.number,
+        title: item.title,
+        url: item.url,
+        state: item.state,
+        base_ref,
+        head_ref: item.head_ref_name,
+        signals: open.then(|| ChangeRequestSignals {
+            review_decision: item.review_decision,
+            review_requested_of_viewer: item.viewer_review_requested,
+            ci: item.ci.state,
+        }),
+    }))
 }
 
 fn item(project: &GitLabProject, me: Option<&str>, mr: MergeRequest) -> Option<ChangeRequestListItem> {
@@ -547,5 +616,28 @@ mod tests {
         assert_eq!((item.state, item.head_ref_name.as_str()), (ChangeRequestState::Merged, "fix"));
         assert_eq!(item.labels, [ChangeRequestLabel { name: "bug".into(), color: "d9534f".into() }]);
         assert_eq!(item.author.avatar_url, "https://gitlab.com/uploads/a.png");
+    }
+
+    #[test]
+    fn a_branch_resolves_to_its_open_merge_request() {
+        let project = GitLabProject { host: "gitlab.com".into(), path: "a/b/c".into() };
+        let mr = |iid: &str, state: &str| serde_json::json!({
+            "iid": iid, "title": "T", "webUrl": format!("https://gitlab.com/a/b/c/-/merge_requests/{iid}"),
+            "state": state, "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+            "sourceBranch": "feat", "targetBranch": "main", "headPipeline": { "status": "FAILED" }
+        });
+        let data: ListData = serde_json::from_value(serde_json::json!({
+            "currentUser": { "username": "me" },
+            "project": { "mergeRequests": { "nodes": [mr("9", "closed"), mr("4", "opened")] } }
+        }))
+        .unwrap();
+        let found = branch_summary(&project, data).unwrap().unwrap();
+        assert_eq!((found.provider.as_str(), found.number, found.base_ref.as_str()), ("gitlab", 4, "main"));
+        assert_eq!(found.signals.unwrap().ci, CiState::Failed);
+        let none: ListData = serde_json::from_value(serde_json::json!({
+            "project": { "mergeRequests": { "nodes": [] } }
+        }))
+        .unwrap();
+        assert_eq!(branch_summary(&project, none).unwrap(), None);
     }
 }
