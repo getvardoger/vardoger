@@ -596,9 +596,9 @@ impl SettingsSection {
     pub const ALL: [SettingsSection; 11] = [
         SettingsSection::General,
         SettingsSection::Appearance,
-        SettingsSection::Chat,
         SettingsSection::Notifications,
         SettingsSection::Shortcuts,
+        SettingsSection::Chat,
         SettingsSection::Harnesses,
         SettingsSection::Devices,
         SettingsSection::Files,
@@ -670,10 +670,10 @@ impl SettingsSection {
         })
     }
 
-    /// Nav groups are separated by spacing alone: preferences, providers and
-    /// devices, then workspace data.
+    /// Nav groups are separated by spacing alone: preferences; chat,
+    /// providers and devices; then workspace data.
     fn starts_nav_group(self) -> bool {
-        matches!(self, Self::Harnesses | Self::Files)
+        matches!(self, Self::Chat | Self::Files)
     }
 
     /// Sidebar + header label (commutator settings-sidebar.tsx SECTIONS / __root.tsx
