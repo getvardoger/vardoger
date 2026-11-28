@@ -1331,6 +1331,12 @@ pub enum AgentEvent {
     Error {
         message: String,
     },
+    /// The agent's guess at the person's next prompt, sent after a turn ends
+    /// (Claude Code's `prompt_suggestion`). The engine keeps the latest on
+    /// the chat doc's meta for the composer's Tab; never part of the transcript.
+    PromptSuggestion {
+        text: String,
+    },
     #[serde(rename_all = "camelCase")]
     InputRequested {
         request_id: String,

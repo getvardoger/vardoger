@@ -4581,6 +4581,7 @@ impl Shell {
                         replay_baseline: Some(commutator_doc::TranscriptBaseline::capture(&entries)),
                         frame: commutator_doc::TranscriptFrame::Reset { reset: entries },
                         context_usage: None,
+                        prompt_suggestion: None,
                     };
                     let prepared = crate::transcript::TranscriptPreparation::default()
                         .prepare(&update)

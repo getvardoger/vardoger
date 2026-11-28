@@ -795,6 +795,20 @@ pub fn set_show_turn_changes(enabled: bool, cx: &mut App) {
     }
 }
 
+/// See [`UiSettings::prompt_suggestions`].
+pub fn prompt_suggestions(cx: &App) -> bool {
+    cx.try_global::<SettingsStore>()
+        .is_none_or(|store| store.current.prompt_suggestions)
+}
+
+pub fn set_prompt_suggestions(enabled: bool, cx: &mut App) {
+    if update(SavePolicy::Immediate, cx, |settings| {
+        settings.prompt_suggestions = enabled;
+    }) {
+        cx.refresh_windows();
+    }
+}
+
 /// Agent-sent code fences wrap to the chat width instead of scrolling.
 pub fn code_fences_fit_content(cx: &App) -> bool {
     cx.try_global::<SettingsStore>()
@@ -1103,6 +1117,9 @@ pub struct UiSettings {
     /// steering the live turn (t3code's "Follow-up behavior"). The send
     /// shortcut with the platform modifier does the other.
     pub queue_follow_ups: bool,
+    /// Claude's guess at the next prompt shows in the empty composer; Tab
+    /// takes it (t3code's prompt suggestions). Settings › Chat.
+    pub prompt_suggestions: bool,
     /// Legacy global opt-in; per-harness preferences take precedence.
     pub skills_in_slash_menu: bool,
     pub skill_completion_by_harness:
@@ -1370,6 +1387,7 @@ impl Default for UiSettings {
             settings_section: crate::shell::SettingsSection::default(),
             composer_send_behavior: ComposerSendBehavior::default(),
             queue_follow_ups: false,
+            prompt_suggestions: true,
             skills_in_slash_menu: false,
             skill_completion_by_harness: Default::default(),
             compact_model_picker: true,
@@ -1976,6 +1994,7 @@ impl UiSettings {
             window_geometry,
             composer_send_behavior,
             queue_follow_ups,
+            prompt_suggestions,
             skills_in_slash_menu,
             skill_completion_by_harness,
             compact_model_picker,
@@ -3096,6 +3115,7 @@ mod tests {
             settings_section: crate::shell::SettingsSection::Shortcuts,
             composer_send_behavior: ComposerSendBehavior::ModEnter,
             queue_follow_ups: true,
+            prompt_suggestions: false,
             skills_in_slash_menu: true,
             skill_completion_by_harness: Default::default(),
             compact_model_picker: true,

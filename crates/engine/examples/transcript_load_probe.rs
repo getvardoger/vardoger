@@ -17,6 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let preview = commutator_doc::TranscriptUpdate {
             frame: commutator_doc::TranscriptFrame::reset(&tail),
             context_usage: doc.context_usage(),
+            prompt_suggestion: None,
             replay_baseline: Some(commutator_doc::TranscriptBaseline::capture(&tail)),
         };
         let tail_wire = serde_json::to_vec(&serde_json::to_value(preview)?)?;
@@ -53,6 +54,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let update = commutator_doc::TranscriptUpdate {
             frame: commutator_doc::TranscriptFrame::reset(&entries),
             context_usage: doc.context_usage(),
+            prompt_suggestion: None,
             replay_baseline: Some(commutator_doc::TranscriptBaseline::capture(&entries)),
         };
         let value = serde_json::to_value(update)?;

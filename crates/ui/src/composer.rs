@@ -630,6 +630,20 @@ fn interrupt_params(chat_id: &str) -> serde_json::Value {
     })
 }
 
+/// Claude runs ask the CLI for a next-prompt guess per Settings › Chat
+/// (`--prompt-suggestions`). Stamped either way, so turning it off reaches a
+/// live runtime; other agents never see the key.
+fn with_prompt_suggestions(
+    harness: Option<HarnessId>,
+    mut options: serde_json::Map<String, serde_json::Value>,
+    on: bool,
+) -> serde_json::Map<String, serde_json::Value> {
+    if harness == Some(HarnessId::ClaudeCode) {
+        options.insert("promptSuggestions".into(), on.into());
+    }
+    options
+}
+
 fn escape_dismisses_completion(key: &str, completion_open: bool) -> bool {
     key == "escape" && completion_open
 }
@@ -1907,6 +1921,11 @@ pub struct ComposerInput {
     edit_revision: u64,
     pub(crate) read_only: bool,
     placeholder: SharedString,
+    /// The agent's guess at the next prompt, shown in place of the
+    /// placeholder while the input is empty; Tab takes it, Escape drops it.
+    suggestion: Option<SharedString>,
+    /// The last suggestion Escape dropped, so it doesn't come back.
+    dismissed_suggestion: Option<SharedString>,
     selected_range: Range<usize>,
     selection_reversed: bool,
     caret_affinity: CaretAffinity,
@@ -2033,6 +2052,8 @@ impl ComposerInput {
             edit_revision: 0,
             read_only: false,
             placeholder: placeholder.into(),
+            suggestion: None,
+            dismissed_suggestion: None,
             selected_range: 0..0,
             selection_reversed: false,
             caret_affinity: CaretAffinity::Downstream,
@@ -2497,6 +2518,24 @@ impl ComposerInput {
     ) {
         self.placeholder = placeholder.into();
         cx.notify();
+    }
+
+    /// Offer (or withdraw) a suggested prompt; one Escape dropped stays gone.
+    pub fn set_suggestion(&mut self, suggestion: Option<SharedString>, cx: &mut Context<Self>) {
+        let suggestion = suggestion.filter(|s| Some(s) != self.dismissed_suggestion.as_ref());
+        if self.suggestion != suggestion {
+            self.suggestion = suggestion;
+            self.needs_measure = true;
+            cx.notify();
+        }
+    }
+
+    /// What an empty input shows: the suggestion with its key, or the placeholder.
+    fn shown_placeholder(&self) -> SharedString {
+        match &self.suggestion {
+            Some(text) => format!("{text}   ⇥ Tab").into(),
+            None => self.placeholder.clone(),
+        }
     }
 
     pub fn set_text(&mut self, text: impl Into<String>, cx: &mut Context<Self>) {
@@ -3333,6 +3372,11 @@ impl ComposerInput {
     fn mention_tab(&mut self, _: &MentionTab, window: &mut Window, cx: &mut Context<Self>) {
         if self.mention_has_selection {
             cx.emit(ComposerInputEvent::MentionAccept);
+        } else if self.content.is_empty()
+            && !self.read_only
+            && let Some(text) = self.suggestion.take()
+        {
+            self.set_text(text.to_string(), cx);
         } else if !self.indent_list(false, window, cx) {
             cx.propagate();
         }
@@ -3417,6 +3461,14 @@ impl ComposerInput {
     fn on_key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
         if escape_dismisses_completion(&event.keystroke.key, self.mention_open) {
             cx.emit(ComposerInputEvent::MentionDismiss);
+            cx.stop_propagation();
+        } else if event.keystroke.key == "escape"
+            && self.content.is_empty()
+            && let Some(text) = self.suggestion.take()
+        {
+            self.dismissed_suggestion = Some(text);
+            self.needs_measure = true;
+            cx.notify();
             cx.stop_propagation();
         }
     }
@@ -3927,7 +3979,7 @@ impl ComposerInput {
             chip_color: theme.code_text,
             syntax: theme.syntax.clone(),
             marked_range: self.marked_range.clone(),
-            placeholder: self.placeholder.clone(),
+            placeholder: self.shown_placeholder(),
             mentions_enabled: self.mentions_enabled,
             active_line: self.mentions_enabled.then(|| self.editing_source_range()),
         };
@@ -3948,7 +4000,7 @@ impl ComposerInput {
         // frame (or longer when no subsequent layout is requested).
         self.refresh_projection();
         let (display, is_placeholder) = if self.content.is_empty() {
-            (self.placeholder.clone(), true)
+            (self.shown_placeholder(), true)
         } else {
             (SharedString::from(self.projection.display.clone()), false)
         };
@@ -8549,6 +8601,7 @@ impl Composer {
         // Fully-resolved model/reasoning/options — concrete values (chat config
         // or defaults), so the engine never has to guess a "default".
         let resolved = self.pickers.read(cx).resolved(cx);
+        let prompt_suggestions = crate::settings::prompt_suggestions(cx);
         let existing_cwd = self
             .state
             .read(cx)
@@ -9158,7 +9211,11 @@ impl Composer {
                         harness: resolved.harness,
                         model: resolved.model.clone(),
                         reasoning: resolved.reasoning,
-                        model_options: resolved.model_options.clone(),
+                        model_options: with_prompt_suggestions(
+                            resolved.harness,
+                            resolved.model_options.clone(),
+                            prompt_suggestions,
+                        ),
                         cwd,
                         sandbox: SandboxLevel::WorkspaceWrite,
                         auto_approve: false,
@@ -9991,6 +10048,14 @@ impl Render for Composer {
         }
         let theme = Theme::of(cx).clone();
         let wizard_active = self.wizard.is_some();
+        let suggestion = (crate::settings::prompt_suggestions(cx)
+            && !wizard_active
+            && self.editing_queued.is_none()
+            && !self.run_live(cx))
+        .then(|| self.state.read(cx).prompt_suggestion.clone().map(SharedString::from))
+        .flatten();
+        self.input
+            .update(cx, |input, cx| input.set_suggestion(suggestion, cx));
         if self.mention.token.is_some()
             && (wizard_active || !self.input.focus_handle(cx).is_focused(window))
         {
@@ -10938,6 +11003,41 @@ mod tests {
                     .update(cx, |input, cx| test(input, window, cx));
             })
             .unwrap();
+    }
+
+    #[gpui::test]
+    fn tab_takes_the_suggestion_and_escape_drops_it(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            gpui_base::init(cx);
+            cx.set_global(Theme::dark());
+            init(cx, ComposerSendBehavior::default());
+        });
+        let handle = cx.add_window(|window, cx| {
+            let mut input = ComposerInput::with_context("", MESSAGE_COMPOSER_CONTEXT, cx);
+            input.set_suggestion(Some("run the tests".into()), cx);
+            window.focus(&input.focus_handle, cx);
+            input
+        });
+        let text = |cx: &mut gpui::TestAppContext| {
+            handle.read_with(cx, |input, _| input.text().to_owned()).unwrap()
+        };
+        cx.update_window(handle.into(), |_, window, cx| window.draw(cx).clear())
+            .unwrap();
+        cx.simulate_keystrokes(handle.into(), "tab");
+        assert_eq!(text(cx), "run the tests");
+        handle
+            .update(cx, |input, _, cx| {
+                input.set_text("", cx);
+                input.set_suggestion(Some("commit it".into()), cx);
+            })
+            .unwrap();
+        cx.simulate_keystrokes(handle.into(), "escape");
+        // Dropped for good: offering it again changes nothing, and Tab is Tab.
+        handle
+            .update(cx, |input, _, cx| input.set_suggestion(Some("commit it".into()), cx))
+            .unwrap();
+        cx.simulate_keystrokes(handle.into(), "tab");
+        assert_eq!(text(cx), "\t");
     }
 
     #[gpui::test]

@@ -2495,9 +2495,9 @@ fn doc_messages_stream_from(
         Some((snapshot, baseline)) => (Some(snapshot), baseline),
         None => (None, commutator_doc::TranscriptBaseline::default()),
     };
-    let usage = prev.as_ref().map(|_| doc.context_usage());
+    let usage = prev.as_ref().map(|_| (doc.context_usage(), doc.prompt_suggestion()));
     futures::stream::unfold(
-        (rx, prev, doc, usage.flatten(), baseline),
+        (rx, prev, doc, usage.unwrap_or_default(), baseline),
         move |(mut rx, mut prev, doc, mut previous_usage, mut opening_baseline)| async move {
             loop {
                 if prev.is_some() {
@@ -2541,14 +2541,15 @@ fn doc_messages_stream_from(
                 prev = Some(current);
                 // No-op commits (a second watcher attaching, command-only
                 // changes) produce empty deltas — skip the frame entirely.
-                let usage = doc.context_usage();
+                let usage = (doc.context_usage(), doc.prompt_suggestion());
                 if frame.is_empty_delta() && usage == previous_usage && replay_baseline.is_none() {
                     continue;
                 }
-                previous_usage = usage;
+                previous_usage = usage.clone();
                 let value = serde_json::to_value(commutator_doc::TranscriptUpdate {
                     frame,
-                    context_usage: usage,
+                    context_usage: usage.0,
+                    prompt_suggestion: usage.1,
                     replay_baseline,
                 })
                 .ok()?;
@@ -2602,6 +2603,7 @@ async fn windowed_doc_messages_stream(
                 let mut value = serde_json::to_value(commutator_doc::TranscriptUpdate {
                     frame,
                     context_usage: usage,
+                    prompt_suggestion: None,
                     replay_baseline: None,
                 })
                 .ok()?;
@@ -2654,6 +2656,7 @@ async fn since_doc_messages_stream(
         let mut preview = serde_json::to_value(commutator_doc::TranscriptUpdate {
             frame: commutator_doc::TranscriptFrame::reset(&changed),
             context_usage: handle.doc().context_usage(),
+            prompt_suggestion: handle.doc().prompt_suggestion(),
             replay_baseline: Some(commutator_doc::TranscriptBaseline::capture(&changed)),
         })
         .map_err(|e| crate::EngineError::Other(e.to_string()))?;
@@ -2713,6 +2716,7 @@ fn since_stream(
         let mut first = serde_json::to_value(commutator_doc::TranscriptUpdate {
             frame,
             context_usage: handle.doc().context_usage(),
+            prompt_suggestion: handle.doc().prompt_suggestion(),
             replay_baseline: Some(sent),
         })
         .map_err(|e| crate::EngineError::Other(e.to_string()))?;
@@ -2741,6 +2745,7 @@ async fn opening_doc_messages_stream(
         let mut preview = serde_json::to_value(commutator_doc::TranscriptUpdate {
             frame: commutator_doc::TranscriptFrame::reset(&entries),
             context_usage: handle.doc().context_usage(),
+            prompt_suggestion: handle.doc().prompt_suggestion(),
             replay_baseline: Some(commutator_doc::TranscriptBaseline::capture(&entries)),
         })
         .map_err(|e| crate::EngineError::Other(e.to_string()))?;

@@ -5751,6 +5751,13 @@ async fn drive_run(
             }
             continue;
         }
+        // Arrives after Done, like usage: kept on the doc, never reopens a turn.
+        if let AgentEvent::PromptSuggestion { text } = &event {
+            if let Err(err) = doc_ref.set_prompt_suggestion(text) {
+                tracing::warn!(%chat_id, error = %err, "prompt suggestion write failed");
+            }
+            continue;
+        }
         // Capacity/occupancy can settle after Done; updating it must not reopen a turn.
         if let AgentEvent::ContextUsage { tokens, window } = &event {
             if let Err(err) = doc_ref.update_context_usage(*tokens, *window) {

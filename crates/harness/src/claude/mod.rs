@@ -612,6 +612,11 @@ impl ClaudeHarness {
             });
         }
         let mut settings = serde_json::Map::new();
+        // The composer's Tab suggestion (Settings › Chat): the CLI then sends
+        // a `prompt_suggestion` after each turn.
+        if option_is_on(&request.model_options, "promptSuggestions") {
+            args.push("--prompt-suggestions".into());
+        }
         if option_is_on(&request.model_options, "fastMode") {
             settings.insert("fastMode".into(), Value::Bool(true));
         }
@@ -667,6 +672,12 @@ impl ClaudeHarness {
         // also leaves the process title and terminal tab alone, which a
         // piped CLI never shows anyway. A `claude` the run starts inherits it.
         cmd.env("CLAUDE_CODE_DISABLE_TERMINAL_TITLE", "1");
+        // `--prompt-suggestions` alone emits nothing in print mode: the CLI
+        // turns suggestions off for non-interactive runs unless this is set
+        // (verified live against 2.1.332).
+        if option_is_on(&request.model_options, "promptSuggestions") {
+            cmd.env("CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION", "1");
+        }
         // "200K" really limits the window (see `caps_context_at_200k`).
         if caps_context_at_200k(request) {
             cmd.env("CLAUDE_CODE_DISABLE_1M_CONTEXT", "1");

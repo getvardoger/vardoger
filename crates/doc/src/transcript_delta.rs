@@ -25,6 +25,10 @@ pub struct TranscriptUpdate {
     pub frame: TranscriptFrame,
     #[serde(default)]
     pub context_usage: Option<commutator_proto::ContextUsage>,
+    /// The agent's guess at the next prompt (composer Tab). Older readers
+    /// ignore it; older hosts never send one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_suggestion: Option<String>,
     /// Historical content included in this update, independent of reset/delta
     /// encoding. Omitted on ordinary live updates and by older engines.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1074,6 +1078,7 @@ mod context_update_tests {
                 tokens: Some(0),
                 window: Some(200000),
             }),
+            prompt_suggestion: None,
         })
         .unwrap();
         assert_eq!(value["contextUsage"]["tokens"], 0);

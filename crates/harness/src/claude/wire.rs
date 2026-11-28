@@ -21,8 +21,16 @@ pub(crate) enum Frame {
     ControlResponse(ControlResponseFrame),
     /// Where the CLI has taken one of our stdin user messages.
     CommandLifecycle(CommandLifecycleFrame),
+    /// The CLI's guess at the next prompt, after a turn (`--prompt-suggestions`).
+    PromptSuggestion(PromptSuggestionFrame),
     /// control_cancel_request / anything unknown.
     Other,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct PromptSuggestionFrame {
+    #[serde(default)]
+    pub suggestion: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -435,6 +443,7 @@ fn typed_frame(value: Value) -> Result<Frame, serde_json::Error> {
         "control_request" => Frame::ControlRequest(serde_json::from_value(value)?),
         "control_response" => Frame::ControlResponse(serde_json::from_value(value)?),
         "command_lifecycle" => Frame::CommandLifecycle(serde_json::from_value(value)?),
+        "prompt_suggestion" => Frame::PromptSuggestion(serde_json::from_value(value)?),
         _ => Frame::Other,
     };
     Ok(frame)

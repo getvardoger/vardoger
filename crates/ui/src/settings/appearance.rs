@@ -379,6 +379,17 @@ impl AppearancePage {
         )
     }
 
+    fn render_prompt_suggestions_row(&self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        chat_switch_row(
+            theme,
+            "Prompt suggestions",
+            "After a Claude turn, suggest the next prompt in the empty composer; Tab takes it.",
+            crate::settings::prompt_suggestions(cx),
+            crate::settings::set_prompt_suggestions,
+            cx,
+        )
+    }
+
     fn render_turn_changes_row(&self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
         chat_switch_row(
             theme,
@@ -4066,6 +4077,7 @@ impl Render for AppearancePage {
             .child(self.render_turn_changes_row(&theme, cx))
             .child(self.render_code_wrap_row(&theme, cx))
             .child(self.render_rich_composer_row(&theme, cx))
+            .child(self.render_prompt_suggestions_row(&theme, cx))
             .children(self.render_math_rows(&theme, cx));
         let mut font_section = widgets::section(&theme, "Fonts and layout", font_rows);
         let cursor_settings = crate::settings::current(cx);

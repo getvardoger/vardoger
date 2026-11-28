@@ -1611,6 +1611,15 @@ impl Normalizer {
                 out
             }
 
+            Frame::PromptSuggestion(f) => {
+                let text = f.suggestion.trim();
+                if text.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![AgentEvent::PromptSuggestion { text: text.to_owned() }]
+                }
+            }
+
             // Control frames are handled by the run loop, not normalized.
             Frame::ControlRequest(_)
             | Frame::ControlResponse(_)
@@ -1863,6 +1872,15 @@ mod tests {
     fn normalize_one(raw: &str) -> Vec<AgentEvent> {
         let frame = crate::claude::wire::parse_frame(raw).expect("frame parses");
         Normalizer::new().normalize(frame, false)
+    }
+
+    #[test]
+    fn a_prompt_suggestion_becomes_its_event() {
+        assert_eq!(
+            normalize_one(r#"{"type":"prompt_suggestion","suggestion":" run the tests \n","uuid":"u","session_id":"s"}"#),
+            vec![AgentEvent::PromptSuggestion { text: "run the tests".into() }]
+        );
+        assert!(normalize_one(r#"{"type":"prompt_suggestion","suggestion":"  "}"#).is_empty());
     }
 
     #[test]

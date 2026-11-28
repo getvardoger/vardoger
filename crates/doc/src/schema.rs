@@ -722,6 +722,23 @@ impl SessionDoc {
         Ok(())
     }
 
+    /// The agent's guess at the next prompt (composer Tab), until the
+    /// person's next message.
+    pub fn prompt_suggestion(&self) -> Option<String> {
+        match self.doc.get_map("meta").get("promptSuggestion")? {
+            loro::ValueOrContainer::Value(LoroValue::String(s)) => Some(s.to_string()),
+            _ => None,
+        }
+    }
+
+    pub fn set_prompt_suggestion(&self, text: &str) -> Result<(), DocError> {
+        if self.prompt_suggestion().as_deref() != Some(text) {
+            self.doc.get_map("meta").insert("promptSuggestion", text)?;
+            self.commit();
+        }
+        Ok(())
+    }
+
     pub fn clear_context_usage(&self) -> Result<(), DocError> {
         self.doc.get_map("meta").delete("contextUsage")?;
         self.commit();
@@ -844,6 +861,10 @@ impl SessionDoc {
     /// Insert a complete message entry (user/system messages, command-side inserts).
     /// Streaming assistant entries go through [`SegmentWriter`].
     pub fn push_message(&self, entry: &SessionMessageEntry) -> Result<(), DocError> {
+        // The person said something: the last turn's guess is spent.
+        if entry.role == MessageRole::User && self.prompt_suggestion().is_some() {
+            self.doc.get_map("meta").delete("promptSuggestion")?;
+        }
         let messages = self.doc.get_list("messages");
         let map = messages.push_container(LoroMap::new())?;
         write_entry_scalar_fields(&map, entry)?;

@@ -750,6 +750,8 @@ pub struct AppState {
     /// chat's doc holds them (every device sees the same queue).
     pub queue: Vec<commutator_doc::QueuedMessage>,
     pub context_usage: Option<commutator_proto::ContextUsage>,
+    /// The selected chat's agent-guessed next prompt (composer Tab).
+    pub prompt_suggestion: Option<String>,
     /// The selected chat has a transcript from a `WatchDocMessages` reset
     /// (including a retained reset from an earlier visit). An
     /// empty transcript is otherwise indistinguishable from the pre-replay
@@ -900,6 +902,7 @@ impl AppState {
             transcript: Vec::new(),
             queue: Vec::new(),
             context_usage: None,
+            prompt_suggestion: None,
             transcript_replayed: false,
             transcript_baselines: HashMap::new(),
             transcript_cache: Default::default(),
@@ -1144,6 +1147,8 @@ impl AppState {
             self.restore_canvas_target();
             self.transcript.clear();
             self.context_usage = None;
+        self.prompt_suggestion = None;
+            self.prompt_suggestion = None;
             self.transcript_revision = self.transcript_revision.wrapping_add(1);
             self.transcript_replayed = false;
             self.transcript_task = None;
@@ -1577,6 +1582,10 @@ impl AppState {
         }
         if self.context_usage != update.context_usage {
             self.context_usage = update.context_usage;
+            cx.notify();
+        }
+        if self.prompt_suggestion != update.prompt_suggestion {
+            self.prompt_suggestion = update.prompt_suggestion;
             cx.notify();
         }
         Ok(())
@@ -2405,6 +2414,7 @@ impl AppState {
         self.transcript_cache.clear();
         self.prepared_transcripts.clear();
         self.context_usage = None;
+        self.prompt_suggestion = None;
         self.transcript_revision = self.transcript_revision.wrapping_add(1);
         self.transcript_replayed = false;
         self.echoes.clear();
@@ -3004,6 +3014,7 @@ impl AppState {
         self.auto_selected = true;
         self.transcript.clear();
         self.context_usage = None;
+        self.prompt_suggestion = None;
         self.transcript_revision = self.transcript_revision.wrapping_add(1);
         self.transcript_replayed = false;
         if let Some(cached) = cached {
@@ -4280,6 +4291,7 @@ mod tests {
             let update = |id: &str| commutator_doc::TranscriptUpdate {
                 frame: TranscriptFrame::reset(&[user_entry(id)]),
                 context_usage: None,
+                prompt_suggestion: None,
                 replay_baseline: None,
             };
             state.select_chat(Some("whale".into()), cx);
