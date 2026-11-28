@@ -5524,7 +5524,7 @@ impl Shell {
     fn random_wallpaper(&mut self, cx: &mut Context<Self>) {
         self.ensure_appearance_page(cx);
         if settings::current(cx).wallpaper_folder.is_none() {
-            self.open_settings(SettingsSection::Appearance, cx);
+            self.open_settings(SettingsSection::Chat, cx);
             if let Some(page) = &self.appearance_page {
                 page.update(cx, |page, cx| page.choose_wallpaper_folder(cx));
             }
@@ -5534,7 +5534,7 @@ impl Shell {
         cx.spawn(async move |this, cx| {
             if let Err(error) = task.await {
                 let _ = this.update(cx, |this, cx| {
-                    this.open_settings(SettingsSection::Appearance, cx);
+                    this.open_settings(SettingsSection::Chat, cx);
                     if let Some(page) = &this.appearance_page {
                         page.update(cx, |page, cx| page.show_wallpaper_error(error, cx));
                     }

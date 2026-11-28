@@ -3851,6 +3851,9 @@ impl Render for AppearancePage {
                     .into_any_element(),
             );
         }
+        // The wallpaper (image, folder, effect) shows under Settings › Chat;
+        // the window's material stays here.
+        let wallpaper_rows = settings_rows.split_off(1);
         let current_reduce_motion = crate::motion::preference(cx);
         let reduce_motion_control = widgets::select(
             "reduce-motion",
@@ -4180,7 +4183,14 @@ impl Render for AppearancePage {
                                     .child(
                                         widgets::section(&theme, "Conversation", chat_card)
                                             .mt(px(24.0)),
-                                    ),
+                                    )
+                                    .child(widgets::section(
+                                        &theme,
+                                        "Wallpaper",
+                                        widgets::section_card(&theme)
+                                            .mt_0()
+                                            .children(wallpaper_rows),
+                                    )),
                             )
                         })
                         // ponytail: Appearance's rows keep their old indent
@@ -4204,7 +4214,7 @@ impl Render for AppearancePage {
                                 )
                                 .child(widgets::section(
                                     &theme,
-                                    "Material and background",
+                                    "Material",
                                     widgets::section_card(&theme).mt_0().children(settings_rows),
                                 ))
                                 .child(widgets::section(

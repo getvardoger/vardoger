@@ -515,7 +515,7 @@ pub fn modifier_send_label(is_macos: bool) -> &'static str {
 /// (`every_shortcut_lands_in_a_rendered_group` holds the other half: its group
 /// name must be listed here).
 const GROUP_ORDER: [&str; 8] = [
-    "Appearance",
+    "Chat",
     "Files",
     "Browser",
     "Panels",
@@ -528,7 +528,7 @@ const GROUP_ORDER: [&str; 8] = [
 /// The section a shortcut's row renders under.
 fn group(id: ShortcutId) -> &'static str {
     match id {
-        ShortcutId::RandomWallpaper => "Appearance",
+        ShortcutId::RandomWallpaper => "Chat",
         ShortcutId::CaptureAppshot => "Appshots",
         ShortcutId::SaveFile => "Files",
         ShortcutId::BrowserReload => "Browser",
