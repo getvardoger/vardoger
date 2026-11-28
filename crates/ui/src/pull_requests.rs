@@ -490,6 +490,9 @@ pub struct PullRequestsPage {
     filter_menu: popover::Popup<()>,
     /// The filter pulled onto the bar whose dropdown is open.
     quick_menu: popover::Popup<FilterKey>,
+    /// The bar's width at the last layout, which decides how many filters
+    /// sit on it.
+    bar_width: Option<f32>,
     /// The filter whose submenu shows beside the Filters card.
     opened: Option<FilterKey>,
     /// The Author and Labels submenus' search.
@@ -559,6 +562,7 @@ impl PullRequestsPage {
             sort_menu: popover::Popup::default(),
             filter_menu: popover::Popup::default(),
             quick_menu: popover::Popup::default(),
+            bar_width: None,
             opened: None,
             sub_search,
             sub_query: String::new(),
@@ -1030,6 +1034,30 @@ pub(crate) fn provider_logo(provider: &str, theme: &Theme) -> AnyElement {
             .text_color(theme.text)
             .into_any_element()
     }
+}
+
+const SEARCH_MIN: f32 = 200.0;
+
+/// The filters that fit on the bar, in its order. The rest stay in Filters:
+/// State goes first, Project last.
+fn quick_keys(picks: &PullRequestPicks, width: f32) -> Vec<FilterKey> {
+    // Search, Sort, Filters (with its count), Refresh and their gaps.
+    let fixed = SEARCH_MIN + 80.0 + 110.0 + 30.0 + 3.0 * 8.0;
+    // ponytail: estimated from the label's length, not shaped text.
+    let chip = |label: &str| 8.0 + 54.0 + label.chars().count().min(22) as f32 * 7.2;
+    let state = choice(&STATES, picks.state).1.to_owned();
+    let project = if picks.project.is_empty() { "All projects".into() } else { picks.project.clone() };
+    let author = if picks.author.is_empty() { "Anyone".into() } else { picks.author.clone() };
+    let mut room = width - fixed;
+    let mut fits = |label: &str| {
+        let w = chip(label);
+        (room >= w).then(|| room -= w).is_some()
+    };
+    let (project, author, state) = (fits(&project), fits(&author), fits(&state));
+    [(FilterKey::State, state), (FilterKey::Project, project), (FilterKey::Author, author)]
+        .into_iter()
+        .filter_map(|(key, on)| on.then_some(key))
+        .collect()
 }
 
 /// A bar button: an icon and maybe a label, as Shepherd's `secondary`.
@@ -1937,8 +1965,7 @@ impl Render for PullRequestsPage {
             });
         let search = crate::surface_chrome::input()
             .h(px(30.0))
-            // Narrower than this, the bar's chips wrap under it instead.
-            .min_w(px(220.0))
+            .min_w(px(SEARCH_MIN))
             .rounded(px(8.0))
             .px(px(10.0))
             .child(
@@ -1954,6 +1981,28 @@ impl Render for PullRequestsPage {
                     .overflow_hidden()
                     .child(self.search.clone()),
             );
+        let measure = {
+            let page = cx.weak_entity();
+            gpui::canvas(
+                move |bounds, window, cx| {
+                    let width = f32::from(bounds.size.width);
+                    window.defer(cx, move |_, cx| {
+                        let _ = page.update(cx, |page, cx| {
+                            if page.bar_width.is_none_or(|old| (old - width).abs() > 0.5) {
+                                page.bar_width = Some(width);
+                                cx.notify();
+                            }
+                        });
+                    });
+                },
+                |_, _, _, _| {},
+            )
+            .absolute()
+            .inset_0()
+        };
+        let fitting = quick_keys(&self.picks, self.bar_width.unwrap_or(0.0));
+        let quick: Vec<AnyElement> =
+            fitting.into_iter().map(|key| self.render_quick(key, &theme, cx)).collect();
         let failures = (!self.failures.is_empty()).then(|| {
             let n = self.failures.len();
             div()
@@ -1989,14 +2038,13 @@ impl Render for PullRequestsPage {
             .child(
                 div()
                     .mt(px(14.0))
+                    .relative()
                     .flex()
-                    .flex_wrap()
                     .items_center()
                     .gap(px(8.0))
+                    .child(measure)
                     .child(search)
-                    .child(self.render_quick(FilterKey::State, &theme, cx))
-                    .child(self.render_quick(FilterKey::Project, &theme, cx))
-                    .child(self.render_quick(FilterKey::Author, &theme, cx))
+                    .children(quick)
                     .child(self.render_sort(&theme, cx))
                     .child(self.render_filters(&theme, cx))
                     .child(refresh),
@@ -2123,6 +2171,14 @@ mod tests {
         assert_eq!(rows[0].group(), Group::Authored);
         assert_eq!(rows[1].group(), Group::Reviewing);
         assert_eq!(failures.len(), 1);
+    }
+
+    #[test]
+    fn the_bar_keeps_what_fits_project_first() {
+        let picks = PullRequestPicks::default();
+        assert!(quick_keys(&picks, 400.0).is_empty());
+        assert_eq!(quick_keys(&picks, 620.0), [FilterKey::Project]);
+        assert_eq!(quick_keys(&picks, 2000.0), [FilterKey::State, FilterKey::Project, FilterKey::Author]);
     }
 
     #[test]
